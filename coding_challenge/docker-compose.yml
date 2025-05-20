@@ -1,0 +1,323 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.7.1
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_SIZE: 5
+    AIRFLOW__DATABASE__SQL_ALCHEMY_MAX_OVERFLOW: 10
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_RECYCLE: 1800
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_TIMEOUT: 30
+    AIRFLOW__DATABASE__SQL_ALCHEMY_POOL_PRE_PING: "true"
+    AIRFLOW__CELERY__BROKER_URL: redis://airflow-redis:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow-postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    AIRFLOW__CORE__ENABLE_XCOM_PICKLING: "true"
+    PYTHONPATH: /opt/airflow:/opt/airflow/scripts
+    _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary==2.9.9 apache-airflow-providers-postgres==5.7.1"
+  volumes: &airflow-common-volumes
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    - ./data:/opt/airflow/data
+    - ./spark:/opt/airflow/spark
+    - ./scripts:/opt/airflow/scripts
+
+services:
+  # Airflow services
+  airflow-init:
+    <<: *airflow-common
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: airflow
+      _AIRFLOW_WWW_USER_PASSWORD: airflow
+      AIRFLOW_UID: "50000"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./scripts:/opt/airflow/scripts
+    user: "0:0"  # Start as root to set up permissions
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        set -e  # Exit on any error
+
+        # Clean up logs directory
+        echo "Cleaning up logs directory..."
+        rm -rf /opt/airflow/logs/*
+        mkdir -p /opt/airflow/logs
+        chown -R "${AIRFLOW_UID}:0" /opt/airflow/logs
+
+        # Set up permissions for airflow user
+        echo "Setting up permissions..."
+        mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins
+        chown -R "${AIRFLOW_UID}:0" /opt/airflow
+
+        # Switch to airflow user for pip install and initialization
+        su airflow -c "
+          set -e  # Exit on any error
+
+          # Install Airflow and dependencies
+          echo 'Installing Airflow and dependencies...'
+          pip install 'apache-airflow==2.7.1' --constraint 'https://raw.githubusercontent.com/apache/airflow/constraints-2.7.1/constraints-3.8.txt'
+          pip install psycopg2-binary==2.9.9 apache-airflow-providers-postgres==5.7.1
+
+          # Wait for postgres to be ready
+          echo 'Waiting for postgres...'
+          while ! nc -z airflow-postgres 5432; do
+            sleep 1
+          done
+          echo 'Postgres started'
+
+          # Additional wait to ensure postgres is fully ready
+          echo 'Waiting for postgres to be fully ready...'
+          while ! PGPASSWORD=airflow psql -h airflow-postgres -U airflow -d airflow -c 'SELECT 1' >/dev/null 2>&1; do
+            sleep 1
+          done
+          echo 'Postgres is fully ready'
+
+          # Initialize the database if not already initialized
+          if ! PGPASSWORD=airflow psql -h airflow-postgres -U airflow -d airflow -c 'SELECT 1 FROM information_schema.tables WHERE table_name = variable' >/dev/null 2>&1; then
+            echo 'Initializing fresh Airflow database...'
+            airflow db init
+            
+            # Create admin user if it does not exist
+            echo 'Creating admin user...'
+            airflow users create \
+              --username airflow \
+              --firstname Admin \
+              --lastname User \
+              --role Admin \
+              --email admin@example.com \
+              --password airflow \
+              || echo 'Admin user already exists'
+
+            # Create default connections
+            echo 'Creating default connections...'
+            airflow connections create-default-connections
+          else
+            echo 'Airflow database already initialized, skipping initialization'
+          fi
+
+          # Verify database initialization
+          echo 'Verifying database initialization...'
+          if ! airflow db check; then
+            echo 'Error: Database check failed'
+            exit 1
+          fi
+
+          echo 'Airflow initialization completed successfully!'
+        "
+
+        if [ $? -ne 0 ]; then
+          echo "Error: Airflow initialization failed"
+          exit 1
+        fi
+
+        exit 0
+
+  airflow-webserver:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      airflow-redis:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  airflow-scheduler:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      airflow-redis:
+        condition: service_started
+    command: scheduler
+
+  # This is optional if running on LocalExecutor, but recommended for production with CeleryExecutor
+  airflow-worker:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-postgres:
+        condition: service_healthy
+      airflow-redis:
+        condition: service_started
+      spark:
+        condition: service_started
+    environment:
+      <<: *airflow-common-env
+      PYTHONPATH: /opt/airflow:/opt/airflow/scripts
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./data:/opt/airflow/data
+      - ./spark:/opt/airflow/spark
+      - ./scripts:/opt/airflow/scripts
+      - /var/run/docker.sock:/var/run/docker.sock  # Give access to Docker socket
+    command: celery worker
+    deploy:
+      replicas: 1  # increase this number for production
+
+  airflow-postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+      - POSTGRES_ENCODING=UTF8
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    volumes:
+      - airflow-postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: >
+        bash -c '
+          pg_isready -U airflow &&
+          psql -U airflow -d airflow -c "SELECT 1" -q
+        '
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    user: postgres
+
+  # This is optional if running on LocalExecutor, but recommended for production with CeleryExecutor
+  airflow-redis:
+    image: redis:7.0.11
+    expose:
+      - 6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+
+  # Spark service
+  spark:
+    image: bitnami/spark:3.4.1
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_IPS=spark
+      - SPARK_PUBLIC_DNS=spark
+      - SPARK_MASTER_MEMORY=4g
+      - SPARK_MASTER_CORES=2
+      - SPARK_NETWORK_TIMEOUT=600
+      - SPARK_EXECUTOR_HEARTBEAT_INTERVAL=60
+      - SPARK_RPC_MESSAGE_MAXSIZE=256
+      - SPARK_DRIVER_MAXRESULTSIZE=2048
+      - SPARK_NETWORK_MAXFRAMESIZE=256
+      - SPARK_BUFFER_PAGESIZE=64
+      - SPARK_MASTER_WEBUI_PORT=8082
+    ports:
+      - "8082:8082"  # Spark UI
+      - "7077:7077"  # Spark master
+    volumes:
+      - ./spark:/opt/bitnami/spark/scripts
+      - ./data:/opt/airflow/data
+    user: "1001"  # Default Bitnami Spark user
+    command: >
+      bash -c "
+        pip install jinja2 &&
+        /opt/bitnami/scripts/spark/run.sh
+      "
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8082"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  spark-worker:
+    image: bitnami/spark:3.4.1
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark:7077
+      - SPARK_WORKER_MEMORY=4G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_IPS=spark-worker
+      - SPARK_PUBLIC_DNS=spark-worker
+      - SPARK_NETWORK_TIMEOUT=600
+      - SPARK_EXECUTOR_HEARTBEAT_INTERVAL=60
+      - SPARK_RPC_MESSAGE_MAXSIZE=256
+      - SPARK_DRIVER_MAXRESULTSIZE=2048
+      - SPARK_NETWORK_MAXFRAMESIZE=256
+      - SPARK_BUFFER_PAGESIZE=64
+      - SPARK_WORKER_CLEANUP_ENABLED=true
+      - SPARK_WORKER_CLEANUP_INTERVAL=1800
+      - SPARK_WORKER_CLEANUP_APPDATATTL=3600
+      - SPARK_WORKER_WEBUI_PORT=8082
+    volumes:
+      - ./spark:/opt/bitnami/spark/scripts
+      - ./data:/opt/airflow/data
+    command: >
+      bash -c "
+        pip install jinja2 &&
+        /opt/bitnami/scripts/spark/run.sh
+      "
+    depends_on:
+      - spark
+    deploy:
+      replicas: 1  # increase this number for production
+
+  # This is optional for our project, but recommended for production
+  airflow-triggerer:
+    <<: *airflow-common
+    depends_on:
+      - airflow-postgres
+      - airflow-redis
+    command: triggerer
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ClickHouse service
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native interface
+    volumes:
+      - ./clickhouse/data:/var/lib/clickhouse
+      - ./clickhouse/config:/etc/clickhouse-server
+      - ./clickhouse/init:/docker-entrypoint-initdb.d
+    environment:
+      CLICKHOUSE_DB: taxi_db
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+volumes:
+  airflow-postgres-db-volume: 

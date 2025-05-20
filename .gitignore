@@ -1,0 +1,59 @@
+# Airflow logs
+coding_challenge/airflow/logs/
+coding_challenge/airflow/logs/*
+
+# ClickHouse data
+coding_challenge/clickhouse/data/
+coding_challenge/clickhouse/data/*
+
+# Raw data downloads
+coding_challenge/data/raw/
+coding_challenge/data/raw/*
+
+# Python cache files
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+coding_challenge/venv/
+coding_challenge/venv/*
+venv/
+venv/*
+env/
+env/*
+.env
+
+# Rill executable
+rill
+
+# Rill project
+my-rill-project/tmp
+my-rill-project/tmp/*
+
+
+# IDE and system files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+*.tmp
+*.temp
+
+# Log files
+*.log
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Binary files
+*.bin
+*.dat
+*.idx
+*.cmrk2 

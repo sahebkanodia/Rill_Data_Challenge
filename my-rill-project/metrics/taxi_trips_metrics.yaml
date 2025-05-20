@@ -1,0 +1,88 @@
+# Metrics view YAML
+# Reference documentation: https://docs.rilldata.com/reference/project-files/dashboards
+# This file was generated using AI.
+
+version: 1
+type: metrics_view
+
+display_name: Taxi Trips Metrics
+database_schema: taxi_db
+model: taxi_trips
+timeseries: tpep_pickup_datetime
+
+dimensions:
+  - name: payment_type
+    display_name: Payment Type
+    column: payment_type
+  - name: hour_of_day
+    display_name: Hour Of Day
+    column: hour_of_day
+  - name: pickup_borough
+    display_name: Pickup Borough
+    column: pickup_borough
+  - name: pickup_zone
+    display_name: Pickup Zone
+    column: pickup_zone
+  - name: dropoff_borough
+    display_name: Dropoff Borough
+    column: dropoff_borough
+  - name: dropoff_zone
+    display_name: Dropoff Zone
+    column: dropoff_zone
+  - column: PULocationID
+    name: Pickup Location ID
+  - column: DOLocationID
+    name: Drop Off Location ID
+
+measures:
+  - name: total_trips_measure
+    display_name: Total Trips
+    expression: COUNT(*)
+    description: Total number of taxi trips recorded.
+    format_preset: humanize
+  - name: average_trip_distance_measure
+    display_name: Average Trip Distance
+    expression: AVG(trip_distance)
+    description: Average distance of all taxi trips.
+    format_preset: humanize
+  - name: total_fare_amount_measure
+    display_name: Total Fare Amount
+    expression: SUM(fare_amount)
+    description: Total fare amount collected from all taxi trips.
+    format_preset: humanize
+  - name: average_fare_amount_measure
+    display_name: Average Fare Amount
+    expression: AVG(fare_amount)
+    description: Average fare amount per taxi trip.
+    format_preset: humanize
+  - name: total_tip_amount_measure
+    display_name: Total Tip Amount
+    expression: SUM(tip_amount)
+    description: Total tip amount collected from all taxi trips.
+    format_preset: humanize
+  - name: average_tip_amount_measure
+    display_name: Average Tip Amount
+    expression: AVG(tip_amount)
+    description: Average tip amount per taxi trip.
+    format_preset: humanize
+  - name: total_revenue_measure
+    display_name: Total Revenue
+    expression: SUM(total_amount)
+    description: Total revenue from all taxi trips, including fares and tips.
+    format_preset: humanize
+  - name: average_trip_duration_measure
+    display_name: Average Trip Duration
+    expression: AVG(trip_duration)
+    description: Average duration of all taxi trips.
+    format_preset: humanize
+  - name: max_trip_distance_measure
+    display_name: Maximum Trip Distance
+    expression: MAX(trip_distance)
+    description: Maximum distance recorded for a single taxi trip.
+    format_preset: humanize
+  - name: min_trip_distance_measure
+    display_name: Minimum Trip Distance
+    expression: MIN(trip_distance)
+    description: Minimum distance recorded for a single taxi trip.
+    format_preset: humanize
+smallest_time_grain: hour
