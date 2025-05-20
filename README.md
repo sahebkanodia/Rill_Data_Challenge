@@ -96,3 +96,44 @@ my-rill-project/
    - Created a simple dashboard under `my-rill-project/dashboards/taxi_trips_metrics_explore.yaml`
    - Here's how the dashboard looks like
 ![Rill Dashboard Screenshot](my-rill-project/data/data_analysis_screenshot.png)
+
+
+## Backfilling Historical Data
+
+To reprocess data for a specific month:
+
+1. **Set Airflow Variables**
+   Via Airflow UI: Navigate to Admin -> Variables [http://localhost:8080/variable/list/](http://localhost:8080/variable/list/) and set:
+   - `reprocess_year`: YYYY  (e.g., 2023)
+   - `reprocess_month`: MM   (e.g., 3 for March)
+
+2. **Trigger & Monitor**
+   - Navigate to Airflow UI and trigger the `nyc_taxi_pipeline_ingestion` DAG
+   - The DAG will automatically trigger the main pipeline for reprocessing
+
+3. **Verify Results in ClickHouse**
+
+   ```bash
+   # CLI Access
+   docker-compose exec clickhouse clickhouse-client --user default --password clickhouse
+
+   # UI Access
+   [http://localhost:8123/play](http://localhost:8123/play)    # Web UI with SQL playground
+   ```
+   
+   *Enter username and password on the top right.*
+
+   Run the below query to check data:
+   ```sql
+   SELECT toYYYYMM(pickup_datetime) as month, count(*) 
+   FROM taxi_db.taxi_trips 
+   WHERE toYYYYMM(pickup_datetime) = YYYYMM 
+   GROUP BY month;
+   ```
+
+   In case you want to verify the deduplication, optimize the table by running:
+   ```sql
+   OPTIMIZE TABLE taxi_db.taxi_trips FINAL;
+   ```
+
+   Then run the first query again, both counts should match ideally.   
