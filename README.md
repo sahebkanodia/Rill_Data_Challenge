@@ -104,8 +104,8 @@ To reprocess data for a specific month:
 
 1. **Set Airflow Variables**
    Via Airflow UI: Navigate to Admin -> Variables [http://localhost:8080/variable/list/](http://localhost:8080/variable/list/) and set:
-   - `reprocess_year`: YYYY  (e.g., 2023)
-   - `reprocess_month`: MM   (e.g., 3 for March)
+   - `last_processed_year`: YYYY  (e.g., 2023)
+   - `last_processed_month`: MM   (e.g., 3 for March)
 
 2. **Trigger & Monitor**
    - Navigate to Airflow UI and trigger the `nyc_taxi_pipeline_ingestion` DAG
