@@ -7,12 +7,8 @@ pyspark==3.4.1
 pyarrow==12.0.1
 
 # Database
-duckdb==0.8.1
 psycopg2-binary==2.9.6
 
-# Testing
-pytest==7.4.0
-pytest-spark==0.6.0
 
 # Utilities
 python-dotenv==1.0.0
@@ -25,5 +21,3 @@ rill==0.1.0
 # ClickHouse
 com.clickhouse:clickhouse-jdbc:0.4.6
 clickhouse-connect>=0.6.6
-
-# Existing requirements... 
